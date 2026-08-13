@@ -2,7 +2,14 @@ import { Router } from 'express';
 import * as z from 'zod';
 import { Prisma } from '../generated/prisma/client.js';
 import * as userService from '../services/userService.js';
-import { createToken } from '../services/token.js';
+import { createAccessToken, createRefreshToken } from '../services/token.js';
+
+import {
+  storeRefreshToken,
+  findRefreshToken,
+  revokeRefreshToken,
+  revokeAllUserTokens,
+} from '../services/refreshTokenService.js';
 
 const router = Router();
 
@@ -14,6 +21,10 @@ const registerSchema = z.object({
 const loginSchema = z.object({
   email: z.email(),
   password: z.string().min(1, 'password is required'),
+});
+
+const refreshSchema = z.object({
+  refreshToken: z.string().min(1),
 });
 
 // POST /auth/register
@@ -66,8 +77,51 @@ router.post('/login', async (req, res, next) => {
       return;
     }
 
-    const token = await createToken(user.id);
-    res.status(200).json({ token });
+    const accessToken = await createAccessToken(user.id);
+
+    const { token: refreshToken, tokenHash, expiresAt } = createRefreshToken();
+    await storeRefreshToken(user.id, tokenHash, expiresAt);
+
+    res.status(200).json({ accessToken, refreshToken });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /auth/refresh
+router.post('/refresh', async (req, res, next) => {
+  const result = refreshSchema.safeParse(req.body);
+  if (!result.success) {
+    res.status(400).json({ error: result.error.issues });
+    return;
+  }
+
+  try {
+    const stored = await findRefreshToken(result.data.refreshToken);
+
+    if (!stored) {
+      res.status(401).json({ error: 'Invalid refresh token' });
+      return;
+    }
+
+    if (stored.revokedAt) {
+      await revokeAllUserTokens(stored.userId);
+      res.status(401).json({ error: 'Invalid refresh token' });
+      return;
+    }
+
+    if (stored.expiresAt < new Date()) {
+      res.status(401).json({ error: 'Refresh token expired' });
+      return;
+    }
+
+    await revokeRefreshToken(stored.id);
+
+    const accessToken = await createAccessToken(stored.userId);
+    const { token: refreshToken, tokenHash, expiresAt } = createRefreshToken();
+    await storeRefreshToken(stored.userId, tokenHash, expiresAt);
+
+    res.status(200).json({ accessToken, refreshToken });
   } catch (err) {
     next(err);
   }
