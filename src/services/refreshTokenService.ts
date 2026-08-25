@@ -34,3 +34,14 @@ export function revokeAllUserTokens(userId: number) {
     data: { revokedAt: new Date() },
   });
 }
+
+/**
+ * Revoke a token ONLY if it's still alive.
+ * Returns count: 1 if we won the race, count: 0 if someone beat us.
+ */
+export function revokeIfActive(id: string) {
+  return prisma.refreshToken.updateMany({
+    where: { id, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+}

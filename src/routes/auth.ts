@@ -9,6 +9,7 @@ import {
   findRefreshToken,
   revokeRefreshToken,
   revokeAllUserTokens,
+  revokeIfActive,
 } from '../services/refreshTokenService.js';
 
 const router = Router();
@@ -104,24 +105,46 @@ router.post('/refresh', async (req, res, next) => {
       return;
     }
 
-    if (stored.revokedAt) {
-      await revokeAllUserTokens(stored.userId);
-      res.status(401).json({ error: 'Invalid refresh token' });
-      return;
-    }
-
     if (stored.expiresAt < new Date()) {
       res.status(401).json({ error: 'Refresh token expired' });
       return;
     }
 
-    await revokeRefreshToken(stored.id);
+    // Atomic: revoke only if still alive. count === 0 means it was already dead.
+    const revoked = await revokeIfActive(stored.id);
+
+    if (revoked.count === 0) {
+      await revokeAllUserTokens(stored.userId);
+      res.status(401).json({ error: 'Invalid refresh token' });
+      return;
+    }
 
     const accessToken = await createAccessToken(stored.userId);
     const { token: refreshToken, tokenHash, expiresAt } = createRefreshToken();
     await storeRefreshToken(stored.userId, tokenHash, expiresAt);
 
     res.status(200).json({ accessToken, refreshToken });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /auth/logout
+router.post('/logout', async (req, res, next) => {
+  const result = refreshSchema.safeParse(req.body);
+  if (!result.success) {
+    res.status(400).json({ error: result.error.issues });
+    return;
+  }
+
+  try {
+    const stored = await findRefreshToken(result.data.refreshToken);
+
+    if (stored && !stored.revokedAt) {
+      await revokeRefreshToken(stored.id);
+    }
+
+    res.status(200).json({ message: 'Logged out' });
   } catch (err) {
     next(err);
   }
