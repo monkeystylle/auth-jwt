@@ -3,6 +3,7 @@ import * as z from 'zod';
 import { Prisma } from '../generated/prisma/client.js';
 import * as userService from '../services/userService.js';
 import { createAccessToken, createRefreshToken } from '../services/token.js';
+import { loginLimiter, loginIpLimiter } from '../middleware/rateLimit.js';
 
 import {
   storeRefreshToken,
@@ -55,7 +56,7 @@ router.post('/register', async (req, res, next) => {
 });
 
 // POST /auth/login
-router.post('/login', async (req, res, next) => {
+router.post('/login', loginIpLimiter, loginLimiter, async (req, res, next) => {
   const result = loginSchema.safeParse(req.body);
   if (!result.success) {
     res.status(400).json({ error: result.error.issues });

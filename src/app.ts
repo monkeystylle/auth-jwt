@@ -14,6 +14,14 @@ app.get('/healthcheck', (_req, res) => {
   res.status(200).json({ message: 'API is up and running!' });
 });
 
+app.get('/debug/ip', (req, res) => {
+  res.json({
+    ip: req.ip,
+    xForwardedFor: req.headers['x-forwarded-for'],
+    trustProxy: app.get('trust proxy'),
+  });
+});
+
 app.use('/auth', authRouter);
 app.use('/messages', authenticate, messagesRouter);
 
