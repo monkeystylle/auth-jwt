@@ -8,6 +8,8 @@ import { authenticate } from './middleware/authenticate.js';
 
 const app = express();
 
+app.set('trust proxy', 2);
+
 app.use(express.json());
 
 app.get('/healthcheck', (_req, res) => {
