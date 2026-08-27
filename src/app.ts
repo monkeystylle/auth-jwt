@@ -5,19 +5,21 @@ import type { Request, Response, NextFunction } from 'express';
 import authRouter from './routes/auth.js';
 import messagesRouter from './routes/messages.js';
 import { authenticate } from './middleware/authenticate.js';
+import { globalLimiter, apiLimiter } from './middleware/rateLimit.js';
 
 const app = express();
 
 app.set('trust proxy', 2);
 
 app.use(express.json());
+app.use(globalLimiter);
 
 app.get('/healthcheck', (_req, res) => {
   res.status(200).json({ message: 'API is up and running!' });
 });
 
 app.use('/auth', authRouter);
-app.use('/messages', authenticate, messagesRouter);
+app.use('/messages', authenticate, apiLimiter, messagesRouter);
 
 // Central error handler (must be LAST)
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {

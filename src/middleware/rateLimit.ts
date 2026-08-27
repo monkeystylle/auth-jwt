@@ -27,3 +27,26 @@ export const loginIpLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Too many login attempts from this network.' },
 });
+
+/** For routes behind `authenticate`. Keyed by user, not network. */
+export const apiLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  limit: 60,
+  keyGenerator: req => {
+    if (req.userId) return `user:${req.userId}`;
+    return ipKeyGenerator(req.ip ?? '');
+  },
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please slow down.' },
+});
+
+/** Catch-all. Loose. Runs before everything. */
+export const globalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 300,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  skip: req => req.path === '/healthcheck',
+  message: { error: 'Too many requests, please slow down.' },
+});
