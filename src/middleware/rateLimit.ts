@@ -73,3 +73,29 @@ export const globalLimiter = rateLimit({
   skip: req => req.path === '/healthcheck',
   message: { error: 'Too many requests, please slow down.' },
 });
+
+/** Registration. Stops account spam and email enumeration. */
+export const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  limit: 10,
+  store: new RedisStore({
+    sendCommand,
+    prefix: 'rl:register:',
+  }),
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: 'Too many accounts created from this network.' },
+});
+
+/** Refresh. Capacity protection — each attempt costs a DB query. */
+export const refreshLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 60,
+  store: new RedisStore({
+    sendCommand,
+    prefix: 'rl:refresh:',
+  }),
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: 'Too many refresh attempts.' },
+});
