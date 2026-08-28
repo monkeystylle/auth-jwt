@@ -1,10 +1,21 @@
 import { rateLimit, ipKeyGenerator } from 'express-rate-limit';
+import { RedisStore } from 'rate-limit-redis';
+import { redis } from '../redis.js';
+
+type RedisReply = number | string | (number | string)[];
+
+const sendCommand = (command: string, ...args: string[]) =>
+  redis.call(command, ...args) as Promise<RedisReply>;
 
 /** Tight. Per (network, account) pair. Stops brute force on one account. */
 export const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 10,
   skipSuccessfulRequests: true,
+  store: new RedisStore({
+    sendCommand,
+    prefix: 'rl:login:',
+  }),
   keyGenerator: req => {
     const ip = ipKeyGenerator(req.ip ?? '');
     const email =
@@ -23,6 +34,10 @@ export const loginIpLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 50,
   skipSuccessfulRequests: true,
+  store: new RedisStore({
+    sendCommand,
+    prefix: 'rl:login-ip:',
+  }),
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   message: { error: 'Too many login attempts from this network.' },
@@ -32,6 +47,10 @@ export const loginIpLimiter = rateLimit({
 export const apiLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   limit: 60,
+  store: new RedisStore({
+    sendCommand,
+    prefix: 'rl:api:',
+  }),
   keyGenerator: req => {
     if (req.userId) return `user:${req.userId}`;
     return ipKeyGenerator(req.ip ?? '');
@@ -45,6 +64,10 @@ export const apiLimiter = rateLimit({
 export const globalLimiter = rateLimit({
   windowMs: 60 * 1000,
   limit: 300,
+  store: new RedisStore({
+    sendCommand,
+    prefix: 'rl:global:',
+  }),
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   skip: req => req.path === '/healthcheck',
