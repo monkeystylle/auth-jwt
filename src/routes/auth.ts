@@ -17,6 +17,16 @@ import {
   revokeAllUserTokens,
   revokeIfActive,
 } from '../services/refreshTokenService.js';
+import { TokenType } from '../generated/prisma/client.js';
+import {
+  issueToken,
+  consumeToken,
+  invalidateTokens,
+} from '../services/verificationTokenService.js';
+import {
+  sendVerificationEmail,
+  sendPasswordResetEmail,
+} from '../services/emailService.js';
 
 const router = Router();
 
@@ -34,6 +44,9 @@ const refreshSchema = z.object({
   refreshToken: z.string().min(1),
 });
 
+const tokenSchema = z.object({ token: z.string().min(1) });
+const emailSchema = z.object({ email: z.email() });
+
 // POST /auth/register
 router.post('/register', registerLimiter, async (req, res, next) => {
   const result = registerSchema.safeParse(req.body);
@@ -47,6 +60,12 @@ router.post('/register', registerLimiter, async (req, res, next) => {
       result.data.email,
       result.data.password,
     );
+
+    const token = await issueToken(user.id, TokenType.EMAIL_VERIFICATION);
+    await sendVerificationEmail(user.email, token).catch(err =>
+      console.error('verification email failed:', err),
+    );
+
     res.status(201).json(user);
   } catch (err) {
     if (
@@ -157,3 +176,56 @@ router.post('/logout', async (req, res, next) => {
 });
 
 export default router;
+
+// POST /auth/verify-email
+router.post('/verify-email', async (req, res, next) => {
+  const result = tokenSchema.safeParse(req.body);
+  if (!result.success) {
+    res.status(400).json({ error: result.error.issues });
+    return;
+  }
+
+  try {
+    const userId = await consumeToken(
+      result.data.token,
+      TokenType.EMAIL_VERIFICATION,
+    );
+
+    if (!userId) {
+      res.status(400).json({ error: 'Invalid or expired token' });
+      return;
+    }
+
+    await userService.markEmailVerified(userId);
+    res.status(200).json({ message: 'Email verified' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /auth/resend-verification
+router.post('/resend-verification', async (req, res, next) => {
+  const result = emailSchema.safeParse(req.body);
+  if (!result.success) {
+    res.status(400).json({ error: result.error.issues });
+    return;
+  }
+
+  try {
+    const user = await userService.findUserByEmail(result.data.email);
+
+    if (user && !user.emailVerified) {
+      await invalidateTokens(user.id, TokenType.EMAIL_VERIFICATION);
+      const token = await issueToken(user.id, TokenType.EMAIL_VERIFICATION);
+      await sendVerificationEmail(user.email, token).catch(err =>
+        console.error('verification email failed:', err),
+      );
+    }
+
+    res.status(200).json({
+      message: 'If that account needs verification, an email has been sent.',
+    });
+  } catch (err) {
+    next(err);
+  }
+});

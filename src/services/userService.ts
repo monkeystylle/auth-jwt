@@ -17,3 +17,23 @@ export async function createUser(email: string, password: string) {
 export function verifyPassword(hash: string, password: string) {
   return argon2.verify(hash, password);
 }
+
+export function findUserById(id: number) {
+  return prisma.user.findUnique({ where: { id } });
+}
+
+export function markEmailVerified(userId: number) {
+  return prisma.user.update({
+    where: { id: userId },
+    data: { emailVerified: new Date() },
+  });
+}
+
+export function updatePassword(userId: number, password: string) {
+  return argon2.hash(password).then(passwordHash =>
+    prisma.user.update({
+      where: { id: userId },
+      data: { password: passwordHash },
+    }),
+  );
+}
