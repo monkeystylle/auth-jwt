@@ -8,6 +8,9 @@ import {
   loginIpLimiter,
   registerLimiter,
   refreshLimiter,
+  tokenLimiter,
+  emailSendIpLimiter,
+  emailSendLimiter,
 } from '../middleware/rateLimit.js';
 
 import {
@@ -42,6 +45,11 @@ const loginSchema = z.object({
 
 const refreshSchema = z.object({
   refreshToken: z.string().min(1),
+});
+
+const resetSchema = z.object({
+  token: z.string().min(1),
+  password: z.string().min(8, 'password must be at least 8 characters'),
 });
 
 const tokenSchema = z.object({ token: z.string().min(1) });
@@ -175,10 +183,8 @@ router.post('/logout', async (req, res, next) => {
   }
 });
 
-export default router;
-
 // POST /auth/verify-email
-router.post('/verify-email', async (req, res, next) => {
+router.post('/verify-email', tokenLimiter, async (req, res, next) => {
   const result = tokenSchema.safeParse(req.body);
   if (!result.success) {
     res.status(400).json({ error: result.error.issues });
@@ -204,28 +210,94 @@ router.post('/verify-email', async (req, res, next) => {
 });
 
 // POST /auth/resend-verification
-router.post('/resend-verification', async (req, res, next) => {
-  const result = emailSchema.safeParse(req.body);
+router.post(
+  '/resend-verification',
+  emailSendIpLimiter,
+  async (req, res, next) => {
+    const result = emailSchema.safeParse(req.body);
+    if (!result.success) {
+      res.status(400).json({ error: result.error.issues });
+      return;
+    }
+
+    try {
+      const user = await userService.findUserByEmail(result.data.email);
+
+      if (user && !user.emailVerified) {
+        await invalidateTokens(user.id, TokenType.EMAIL_VERIFICATION);
+        const token = await issueToken(user.id, TokenType.EMAIL_VERIFICATION);
+        await sendVerificationEmail(user.email, token).catch(err =>
+          console.error('verification email failed:', err),
+        );
+      }
+
+      res.status(200).json({
+        message: 'If that account needs verification, an email has been sent.',
+      });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// POST /auth/forgot-password
+router.post(
+  '/forgot-password',
+  emailSendIpLimiter,
+  emailSendLimiter,
+  async (req, res, next) => {
+    const result = emailSchema.safeParse(req.body);
+    if (!result.success) {
+      res.status(400).json({ error: result.error.issues });
+      return;
+    }
+
+    try {
+      const user = await userService.findUserByEmail(result.data.email);
+
+      if (user) {
+        await invalidateTokens(user.id, TokenType.PASSWORD_RESET);
+        const token = await issueToken(user.id, TokenType.PASSWORD_RESET);
+        await sendPasswordResetEmail(user.email, token).catch(err =>
+          console.error('reset email failed:', err),
+        );
+      }
+
+      res.status(200).json({
+        message: 'If that account exists, a reset link has been sent.',
+      });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// POST /auth/reset-password
+router.post('/reset-password', tokenLimiter, async (req, res, next) => {
+  const result = resetSchema.safeParse(req.body);
   if (!result.success) {
     res.status(400).json({ error: result.error.issues });
     return;
   }
 
   try {
-    const user = await userService.findUserByEmail(result.data.email);
+    const userId = await consumeToken(
+      result.data.token,
+      TokenType.PASSWORD_RESET,
+    );
 
-    if (user && !user.emailVerified) {
-      await invalidateTokens(user.id, TokenType.EMAIL_VERIFICATION);
-      const token = await issueToken(user.id, TokenType.EMAIL_VERIFICATION);
-      await sendVerificationEmail(user.email, token).catch(err =>
-        console.error('verification email failed:', err),
-      );
+    if (!userId) {
+      res.status(400).json({ error: 'Invalid or expired token' });
+      return;
     }
 
-    res.status(200).json({
-      message: 'If that account needs verification, an email has been sent.',
-    });
+    await userService.updatePassword(userId, result.data.password);
+    await revokeAllUserTokens(userId);
+
+    res.status(200).json({ message: 'Password updated' });
   } catch (err) {
     next(err);
   }
 });
+
+export default router;

@@ -1,6 +1,19 @@
 import 'dotenv/config';
+import { Resend } from 'resend';
+
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`${name} is not set`);
+  }
+  return value;
+}
 
 const APP_URL = process.env.APP_URL ?? 'http://localhost:3006';
+const apiKey = requireEnv('RESEND_API_KEY');
+const from = requireEnv('EMAIL_FROM');
+
+const resend = new Resend(apiKey);
 
 type Email = {
   to: string;
@@ -8,21 +21,19 @@ type Email = {
   html: string;
 };
 
-/**
- * Dev transport: prints to the console instead of sending.
- * Replaced with a real provider in step 5.
- */
 async function send(email: Email) {
-  console.log('\n--- EMAIL ---');
-  console.log('to:     ', email.to);
-  console.log('subject:', email.subject);
-  console.log(
-    email.html
-      .replace(/<\/p>/g, '\n')
-      .replace(/<[^>]+>/g, '')
-      .trim(),
-  );
-  console.log('-------------\n');
+  const { data, error } = await resend.emails.send({
+    from,
+    to: email.to,
+    subject: email.subject,
+    html: email.html,
+  });
+
+  if (error) {
+    throw new Error(`Resend failed: ${error.message}`);
+  }
+
+  console.log('email sent:', data?.id, '->', email.to);
 }
 
 export async function sendVerificationEmail(to: string, token: string) {

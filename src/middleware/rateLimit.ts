@@ -99,3 +99,52 @@ export const refreshLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Too many refresh attempts.' },
 });
+
+/** Per (network, email). Tight — real users click this once or twice. */
+export const emailSendLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  limit: 3,
+  store: new RedisStore({
+    sendCommand,
+    prefix: 'rl:email-send:',
+  }),
+  keyGenerator: req => {
+    const ip = ipKeyGenerator(req.ip ?? '');
+    const email =
+      typeof req.body?.email === 'string'
+        ? req.body.email.trim().toLowerCase()
+        : 'no-email';
+    return `${ip}:${email}`;
+  },
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: {
+    error: 'Too many requests. Check your inbox, or try again later.',
+  },
+});
+
+/** Per network, all emails. Stops spraying across many addresses. */
+export const emailSendIpLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 20,
+  store: new RedisStore({
+    sendCommand,
+    prefix: 'rl:email-send-ip:',
+  }),
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: 'Too many requests from this network.' },
+});
+
+/** Token submission. Capacity protection — each attempt costs a DB query. */
+export const tokenLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  store: new RedisStore({
+    sendCommand,
+    prefix: 'rl:token:',
+  }),
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: 'Too many attempts, please try again later.' },
+});
